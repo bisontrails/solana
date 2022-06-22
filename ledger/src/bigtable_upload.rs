@@ -87,6 +87,10 @@ pub async fn upload_confirmed_blocks(
             "Loading list of bigtable blocks between slots {} and {}...",
             first_blockstore_slot, last_blockstore_slot
         );
+        datapoint_info!(
+            "storage-bigtable-scanned-block",
+            ("slot", last_blockstore_slot, i64),
+        );
 
         let mut start_slot = *first_blockstore_slot;
         while start_slot <= *last_blockstore_slot {
