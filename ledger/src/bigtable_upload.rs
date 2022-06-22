@@ -4,6 +4,7 @@ use {
     log::*,
     solana_measure::measure::Measure,
     solana_sdk::clock::Slot,
+    solana_metrics::{datapoint_info},
     std::{
         cmp::{max, min},
         collections::HashSet,
@@ -117,6 +118,11 @@ pub async fn upload_confirmed_blocks(
     } else {
         Vec::new()
     };
+
+    datapoint_info!(
+        "storage-bigtable-highest-scanned-block",
+        ("slot", *blockstore_slots.last().unwrap(), i64),
+    );
 
     // The blocks that still need to be uploaded is the difference between what's already in the
     // bigtable and what's in blockstore...
