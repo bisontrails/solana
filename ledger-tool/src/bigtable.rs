@@ -99,6 +99,50 @@ async fn first_available_block(
     Ok(())
 }
 
+async fn get_blocks(
+    slot: Slot,
+    limit: usize,
+    _output_format: OutputFormat,
+    config: solana_storage_bigtable::LedgerStorageConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bigtable = solana_storage_bigtable::LedgerStorage::new_with_config(config)
+        .await
+        .map_err(|err| format!("Failed to connect to storage: {:?}", err))?;
+
+    for s in slot..(limit as u64)+1 {
+        // TODO(arthurb): This is where I'd loop over the blocks. Maybe even
+        // parallelize it?
+        // let confirmed_block = bigtable.get_confirmed_block(s).await?;
+        if let Ok(confirmed_block) = bigtable.get_confirmed_block(s).await {
+            let encoded_block = confirmed_block
+                .encode_with_options(
+                    UiTransactionEncoding::Base64,
+                    BlockEncodingOptions {
+                        transaction_details: TransactionDetails::Full,
+                        show_rewards: true,
+                        max_supported_transaction_version: None,
+                    },
+                )
+                .map_err(|err| match err {
+                    EncodeError::UnsupportedTransactionVersion(version) => {
+                        format!(
+                            "Failed to process unsupported transaction version ({}) in block",
+                            version
+                        )
+                    }
+                })?;
+
+            let _cli_block = CliBlock {
+                encoded_confirmed_block: encoded_block.into(),
+                slot: s,
+            };
+            println!("success");
+        }
+    }
+    // println!("{}", output_format.formatted_string(&cli_block));
+    Ok(())
+}
+
 async fn block(
     slot: Slot,
     output_format: OutputFormat,
@@ -501,6 +545,29 @@ impl BigTableSubCommand for App<'_, '_> {
                         ),
                 )
                 .subcommand(
+                    SubCommand::with_name("get-blocks")
+                        .about("Get confirmed blocks")
+                        .arg(
+                            Arg::with_name("slot")
+                                .long("slot")
+                                .validator(is_slot)
+                                .value_name("SLOT")
+                                .takes_value(true)
+                                .index(1)
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("limit")
+                                .long("limit")
+                                .takes_value(true)
+                                .value_name("LIMIT")
+                                .validator(is_slot)
+                                .index(2)
+                                .default_value("18446744073709551615")
+                                .help("Maximum number of transactions to return"),
+                        ),
+                )
+                .subcommand(
                     SubCommand::with_name("block")
                         .about("Get a confirmed block")
                         .arg(
@@ -677,6 +744,17 @@ pub fn bigtable_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) {
                 ..solana_storage_bigtable::LedgerStorageConfig::default()
             };
             runtime.block_on(first_available_block(config))
+        }
+        ("get-blocks", Some(arg_matches)) => {
+            let starting_slot = value_t_or_exit!(arg_matches, "slot", Slot);
+            let limit = value_t_or_exit!(arg_matches, "limit", usize);
+            let config = solana_storage_bigtable::LedgerStorageConfig {
+                read_only: false,
+                instance_name,
+                app_profile_id,
+                ..solana_storage_bigtable::LedgerStorageConfig::default()
+            };
+            runtime.block_on(get_blocks(starting_slot, limit, output_format, config))
         }
         ("block", Some(arg_matches)) => {
             let slot = value_t_or_exit!(arg_matches, "slot", Slot);
